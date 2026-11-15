@@ -5,7 +5,7 @@
  *
  * Bei jeder Änderung an einer Datei: VERSION erhöhen.
  */
-const VERSION = '1.0.0';
+const VERSION = '1.0.2';
 const CACHE = `nullpunkt-${VERSION}`;
 const FILES = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 
