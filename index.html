@@ -16,7 +16,7 @@
   'self' bei Bildern, Manifest und Worker erlaubt nur Dateien aus dem eigenen Ordner
   (Symbole, manifest.webmanifest, sw.js auf GitHub Pages).
 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-bv/sSko/2JyVLgH5lv/FQzu+9y0qLpx1V8BofFfWx/g='; style-src 'unsafe-inline'; img-src 'self' data: blob:; manifest-src 'self' blob:; connect-src 'none'; font-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'self'; form-action 'none'; base-uri 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-R3kAy4eaP/F7Z66v+QrFEhMXT67QVIsiEkoudsG2pxs='; style-src 'unsafe-inline'; img-src 'self' data: blob:; manifest-src 'self' blob:; connect-src 'none'; font-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; worker-src 'self'; form-action 'none'; base-uri 'none'">
 <meta name="description" content="Nullpunkt: Zero-Based-Budget, das nur auf diesem Gerät gespeichert wird.">
 <title>Nullpunkt</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2316325A'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%23E8F0E9' stroke-width='4' stroke-dasharray='46 11' stroke-linecap='round' transform='rotate(-60 16 16)'/%3E%3Ccircle cx='24' cy='9' r='3' fill='%23FFE14D'/%3E%3C/svg%3E">
@@ -281,6 +281,20 @@ dialog::backdrop { background: var(--backdrop); }
 .group-title:hover { text-decoration: underline; text-underline-offset: 3px; }
 .col-head { text-align: right; font-size: .75rem; color: var(--ink-soft); padding: 0 .375rem var(--s1); border-left: 1px solid var(--margin); }
 .row { border-bottom: 1px solid var(--rule); min-height: 3.25rem; }
+.row-namecell { display: flex; align-items: stretch; min-width: 0; }
+.row-namecell .row-name { flex: 1; }
+.group-titlecell { display: flex; align-items: center; min-width: 0; }
+.group-titlecell .group-title { flex: 1; min-width: 0; }
+/* Ziehgriff: nur hier startet das Verschieben, damit Scrollen normal bleibt */
+.grip { display: grid; place-items: center; width: 1.75rem; flex: none; margin-left: -.375rem; color: var(--ink-soft); opacity: .55; cursor: grab; touch-action: none; border-radius: 4px; -webkit-user-select: none; user-select: none; }
+.grip:hover, .grip:focus-visible { opacity: 1; background: var(--hover); }
+.grip .icon { width: 1.125rem; height: 1.125rem; }
+.grip .icon svg { fill: currentColor; stroke: none; }
+.drop-target > .group-head { background: var(--hover); box-shadow: inset 3px 0 0 var(--marker); }
+.is-dragging { position: relative; z-index: 20; background: var(--sheet); box-shadow: 0 10px 28px rgba(14, 32, 44, .28); border-radius: 6px; }
+.drag-active, .drag-active * { cursor: grabbing !important; -webkit-user-select: none; user-select: none; }
+/* Beim Verschieben von Gruppen nur die Köpfe zeigen, damit es auch auf dem Handy handlich bleibt */
+.sorting-groups .group-sortable .row, .sorting-groups .group-sortable .group-foot, .sorting-groups .group-sortable .col-head { display: none; }
 .row-name { display: flex; flex-direction: column; justify-content: center; gap: 3px; text-align: left; padding: var(--s2) var(--s2) var(--s2) 0; min-width: 0; }
 .row-name:hover .row-title { text-decoration: underline; text-underline-offset: 3px; }
 .row-title { overflow-wrap: break-word; hyphens: auto; line-height: 1.25; }
@@ -345,7 +359,7 @@ dialog::backdrop { background: var(--backdrop); }
 /* Handys: Name in eigener Zeile, darunter die drei Zahlen. So bleiben auch fünfstellige Beträge lesbar. */
 @media (max-width: 519px) {
   .group-head, .row, .group-foot { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .group-title, .row-name, .group-foot > .add { grid-column: 1 / -1; }
+  .group-titlecell, .row-namecell, .savings .savings-title, .group-foot > .add { grid-column: 1 / -1; }
   .row-name { padding-bottom: 0; }
   .planned { min-height: 2.75rem; }
   .group-head > .col-head:nth-child(2), .row > .cell:nth-child(2), .group-foot > .cell:nth-child(2) { border-left: 0; }
@@ -615,7 +629,7 @@ App.Config = (() => {
 
   return {
     /* APP_VERSION bei jeder veröffentlichten Änderung erhöhen, ebenso VERSION in sw.js */
-    APP_ID: 'nullpunkt', APP_VERSION: '1.0.0', DB_NAME: 'nullpunkt', SCHEMA_VERSION: 3,
+    APP_ID: 'nullpunkt', APP_VERSION: '1.0.2', DB_NAME: 'nullpunkt', SCHEMA_VERSION: 3,
     CURRENCIES, MAX_MINOR, TEMPLATE,
     BACKUP_REMINDER_DAYS: 30, BACKUP_SNOOZE_DAYS: 7,
   };
@@ -1839,6 +1853,33 @@ App.State = (() => {
     return [{ store, put: { ...list[i], sort: list[j].sort } }, { store, put: { ...list[j], sort: list[i].sort } }];
   }
   const moveItem = (item, dir) => commit(moveOps('items', Budget.itemsOfGroup(s.snap, item.groupId), item, dir));
+
+  /** Neue Reihenfolge nach Ziehen und Ablegen: sort entspricht der Position */
+  /**
+   * Posten an eine Stelle setzen, auch in eine andere Gruppe desselben Monats.
+   * ids: neue Reihenfolge der Posten in der Zielgruppe.
+   * Buchungen bleiben dem Posten zugeordnet, nur die Gruppe ändert sich.
+   */
+  function moveItemTo(itemId, groupId, ids) {
+    const ops = [];
+    ids.forEach((id, i) => {
+      const r = s.snap.items.find((x) => x.id === id);
+      if (!r) return;
+      const next = { ...r, sort: i, ...(id === itemId ? { groupId } : {}) };
+      if (next.sort !== r.sort || next.groupId !== r.groupId) ops.push({ store: 'items', put: next });
+    });
+    return ops.length ? commit(ops) : Promise.resolve(notify());
+  }
+
+  function reorder(store, ids) {
+    const rows = store === 'items' ? s.snap.items : s.snap.groups;
+    const ops = [];
+    ids.forEach((id, i) => {
+      const r = rows.find((x) => x.id === id);
+      if (r && r.sort !== i) ops.push({ store, put: { ...r, sort: i } });
+    });
+    return ops.length ? commit(ops) : Promise.resolve(notify());
+  }
   function moveGroup(group, dir) {
     /* Die Einnahmen bleiben oben, verschoben werden nur Ausgaben-Gruppen. */
     const list = Budget.groupsOf(s.snap, group.monthId).filter((g) => g.type === group.type);
@@ -2084,7 +2125,7 @@ App.State = (() => {
 
   return {
     s, subscribe, notify, refresh, clear, patchSettings, createAccount, renameAccount, switchAccount, deleteAccount,
-    createMonth, saveMonthNote, setPlanned, addGroup, addPiggy, updateGroup, addItem, updateItem, moveItem, moveGroup,
+    createMonth, saveMonthNote, setPlanned, reorder, moveItemTo, addGroup, addPiggy, updateGroup, addItem, updateItem, moveItem, moveGroup,
     txUsing, deleteItem, deleteGroup, saveTransaction, deleteTransaction,
     suggestFor, forgetRules, assign, assignMany, moveBudget, restToPiggy,
     recurringOf, dueRecurring, confirmRecurring, deleteRecurring, saveImportProfile, importRows,
@@ -2451,6 +2492,7 @@ App.UI = (() => {
     down: '<path d="M5 9l7 7 7-7"/>',
     close: '<path d="M6 6l12 12M18 6L6 18"/>',
     check: '<path d="M5 12.5l4.5 4.5L19 7"/>',
+    grip: '<circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/>',
     lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/>',
     eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
     eyeOff: '<path d="M3 3l18 18"/><path d="M10.6 5.1A10 10 0 0112 5c6.5 0 10 7 10 7a17 17 0 01-3.2 4.2M6.6 6.6C3.8 8.4 2 12 2 12s3.5 7 10 7a9.6 9.6 0 004.4-1"/><path d="M9.9 9.9a3 3 0 004.2 4.2"/>',
@@ -2583,7 +2625,111 @@ App.UI = (() => {
     return input;
   }
 
-  return { h, icon, logo, iconBtn, mount, sheet, confirm, toast, plannedInput, LOGO };
+  /**
+   * Ziehen und Ablegen per Maus, Finger oder Stift (Pointer Events).
+   * Gezogen wird nur am Griff. opts:
+   *   list()     Geschwister, zwischen denen sortiert wird (in DOM-Reihenfolge)
+   *   zones()    stattdessen mehrere Bereiche: [{ el, end, items() }], etwa Gruppen;
+   *              end ist das Element, vor dem am Ende eines Bereichs eingefügt wird
+   *   onDrop(ids) neue Reihenfolge der data-id-Werte
+   *   onStart / onEnd optional, etwa um Gruppen zusammenzuklappen
+   */
+  function draggable(el, handle, opts) {
+    handle.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      const startY = e.clientY;
+      let lastY = startY, dragging = false, grab = 0, shift = 0, raf = 0;
+      try { handle.setPointerCapture(e.pointerId); } catch (ex) { /* ältere Browser */ }
+
+      const frame = () => {
+        raf = 0;
+        const r = el.getBoundingClientRect();
+        const center = lastY - grab + r.height / 2;
+        const mid = (o) => { const q = o.getBoundingClientRect(); return q.top + q.height / 2; };
+        if (opts.zones) {
+          /*
+           * Mehrere Bereiche (Gruppen): Ziel ist der Bereich unter dem Zeiger,
+           * sonst der nächstgelegene. Darin vor die erste tiefere Zeile, sonst ans Ende.
+           */
+          const zones = opts.zones();
+          const dist = (z) => { const q = z.el.getBoundingClientRect(); return center < q.top ? q.top - center : center > q.bottom ? center - q.bottom : 0; };
+          const zone = zones.reduce((best, z) => (dist(z) < dist(best) ? z : best), zones[0]);
+          const before = zone.items().filter((o) => o !== el).find((o) => center < mid(o));
+          const ref = before || zone.end;
+          if (el.nextElementSibling !== ref) ref.before(el);
+          zones.forEach((z) => z.el.classList.toggle('drop-target', z === zone));
+        } else {
+          const others = opts.list().filter((o) => o !== el);
+          const before = others.find((o) => center < mid(o));
+          if (before) { if (el.nextElementSibling !== before) before.before(el); }
+          else if (others.length && others[others.length - 1].nextElementSibling !== el) others[others.length - 1].after(el);
+        }
+        const naturalTop = el.getBoundingClientRect().top - shift;
+        shift = lastY - grab - naturalTop;
+        el.style.transform = `translateY(${shift}px)`;
+        /* Am Bildschirmrand automatisch weiterscrollen */
+        const edge = 72;
+        const dy = lastY < edge ? -14 : lastY > innerHeight - edge ? 14 : 0;
+        if (dy) { scrollBy(0, dy); raf = requestAnimationFrame(frame); }
+      };
+      const begin = () => {
+        dragging = true;
+        /* Klappt onStart etwas zusammen, Seite so verschieben, dass das Element unter dem Finger bleibt */
+        const topBefore = el.getBoundingClientRect().top;
+        if (opts.onStart) opts.onStart();
+        const jump = el.getBoundingClientRect().top - topBefore;
+        if (jump) scrollBy(0, jump);
+        const r = el.getBoundingClientRect();
+        grab = lastY - r.top;
+        if (grab < 0 || grab > r.height) grab = r.height / 2;
+        el.classList.add('is-dragging');
+        document.body.classList.add('drag-active');
+        App.Fun && App.Fun.vibrate(10);
+        frame();
+      };
+      const move = (ev) => {
+        if (ev.pointerId !== e.pointerId) return;
+        lastY = ev.clientY;
+        if (!dragging && Math.abs(lastY - startY) > 5) begin();
+        if (dragging && !raf) raf = requestAnimationFrame(frame);
+      };
+      const end = (ev) => {
+        if (ev && ev.pointerId !== e.pointerId) return;
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', end);
+        window.removeEventListener('pointercancel', end);
+        if (raf) cancelAnimationFrame(raf);
+        if (!dragging) return;
+        el.style.transform = '';
+        el.classList.remove('is-dragging');
+        document.body.classList.remove('drag-active');
+        if (opts.onEnd) opts.onEnd();
+        if (opts.zones) opts.zones().forEach((z) => z.el.classList.remove('drop-target'));
+        const ids = (opts.zones ? [...el.parentElement.children].filter((x) => x.classList.contains(el.classList[0])) : opts.list()).map((x) => x.dataset.id);
+        opts.onDrop(ids, el.parentElement);
+      };
+      /*
+       * Auf window hören: Beim Umsortieren wird das Element im DOM verschoben,
+       * dabei verliert der Griff die Zeigererfassung.
+       */
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', end);
+      window.addEventListener('pointercancel', end);
+    });
+  }
+
+  /** Griff zum Verschieben. Mit Pfeiltasten geht es auch ohne Maus. */
+  function grip(label, fk, onKey) {
+    return h('button', {
+      type: 'button', class: 'grip', 'aria-label': `${label} verschieben, ziehen oder Pfeiltasten`, title: 'Ziehen zum Verschieben', 'data-fk': fk,
+      onkeydown: (e) => {
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); onKey(e.key === 'ArrowUp' ? -1 : 1); }
+      },
+    }, icon('grip'));
+  }
+
+  return { h, icon, logo, iconBtn, mount, sheet, confirm, toast, plannedInput, draggable, grip, LOGO };
 })();
 
 /* ==========================================================================
@@ -2720,6 +2866,7 @@ App.Fun = (() => {
 App.Views = (() => {
   const { Budget, Money, State, Utils, UI, Backup, Config, Demo, Fun, Importer, Reminders } = App;
   const { h, icon, iconBtn, sheet, confirm, toast, plannedInput } = UI;
+  const { draggable, grip } = UI;
   const S = State.s;
   const cur = () => S.snap.account.currency;
   const fmt = (m) => Money.format(m, cur());
@@ -2873,7 +3020,9 @@ App.Views = (() => {
       sub = pg.goal > 0 ? `Gespart ${fmt(pg.saved)} von ${fmt(pg.goal)}` : `Gespart ${fmt(pg.saved)}`;
       if (pg.goal > 0 && pg.goalDate) sub += `, bis ${Utils.monthLabel(pg.goalDate.slice(0, 7))}`;
     }
-    return h('div', { class: 'row' },
+    const handle = grip(item.name, `h-${item.lineId}`, (dir) => guard(State.moveItem(item, dir)));
+    const row = h('div', { class: 'row', 'data-id': item.id },
+      h('div', { class: 'row-namecell' }, handle,
       h('button', { type: 'button', class: 'row-name', 'data-fk': `n-${item.lineId}`, onclick: () => itemSheet(group, item) },
         pg
           ? h('span', { class: 'row-head' },
@@ -2884,7 +3033,7 @@ App.Views = (() => {
         pg && pg.goal > 0
           ? goalBar(pg)
           : !pg && (fig.actual > 0) && h('span', { class: `meter${over ? ' over' : ''}` }, h('i', { style: `width:${pct}%` })),
-        pg && item.motivation && h('span', { class: 'row-why' }, item.motivation)),
+        pg && item.motivation && h('span', { class: 'row-why' }, item.motivation))),
       h('div', { class: 'cell cell-input' }, plannedInput({
         value: item.plannedMinor, currency: cur(), label: `Geplant für ${item.name}`, fk: `p-${item.lineId}`,
         onCommit: (m) => guard(State.setPlanned(item.id, m)),
@@ -2896,6 +3045,27 @@ App.Views = (() => {
         onclick: () => txSheet(null, { type: income ? 'income' : 'expense', lineId: item.lineId }),
       }, icon('plus'), h('span', {}, fmt(fig.actual))),
       balCell(fig.balance, () => rebudgetSheet(item.id), item.name));
+    /*
+     * Posten verschieben: Ausgaben-Posten auch in eine andere Ausgaben-Gruppe.
+     * Einnahmen und Sparschweine bleiben in ihrem Bereich.
+     */
+    const zoneOf = (sec) => ({ el: sec, end: sec.querySelector(':scope > .group-foot'), items: () => [...sec.children].filter((x) => x.classList.contains('row')) });
+    draggable(row, handle, {
+      zones: () => {
+        const own = row.closest('.group');
+        const main = row.closest('.budget-main');
+        const secs = group.type === 'expense' && main ? [...main.querySelectorAll(':scope > .group-sortable')] : [own];
+        return secs.filter(Boolean).map(zoneOf);
+      },
+      onDrop: (ids, parent) => {
+        const target = parent && parent.dataset.id;
+        const moved = target && target !== item.groupId;
+        guard(State.moveItemTo(item.id, target || item.groupId, ids)).then(() => {
+          if (moved) toast(`${item.name} nach ${(S.snap.groups.find((g) => g.id === target) || {}).name} verschoben`);
+        });
+      },
+    });
+    return row;
   }
 
   /* ---- Balance: farbig, damit offene Beträge auffallen ---- */
@@ -2950,9 +3120,12 @@ App.Views = (() => {
     const planned = Utils.sum(items, (i) => i.plannedMinor);
     const actual = Utils.sum(items, (i) => actuals.get(i.id) || 0);
     const balance = planned - actual;
-    return h('section', { class: 'group' },
+    /* Ausgaben-Gruppen lassen sich verschieben, die Einnahmen bleiben oben. */
+    const handle = !income && grip(group.name, `gh-${group.lineId}`, (dir) => guard(State.moveGroup(group, dir)));
+    const section = h('section', { class: `group${income ? '' : ' group-sortable'}`, 'data-id': group.id },
       h('div', { class: 'group-head' },
-        h('button', { type: 'button', class: 'group-title', 'data-fk': `g-${group.lineId}`, onclick: () => groupSheet(group) }, group.name),
+        h('div', { class: 'group-titlecell' }, handle,
+          h('button', { type: 'button', class: 'group-title', 'data-fk': `g-${group.lineId}`, onclick: () => groupSheet(group) }, group.name)),
         h('div', { class: 'col-head' }, 'Geplant'),
         h('div', { class: 'col-head' }, income ? 'Erhalten' : 'Ausgegeben'),
         h('div', { class: 'col-head', title: 'Geplant minus Ist. Soll am Monatsende 0 sein.' }, 'Balance')),
@@ -2962,6 +3135,15 @@ App.Views = (() => {
         h('div', { class: 'cell num' }, fmt(planned)),
         h('div', { class: 'cell num' }, fmt(actual)),
         balCell(balance)));
+    if (handle) {
+      draggable(section, handle, {
+        list: () => (section.parentElement ? [...section.parentElement.children].filter((x) => x.classList.contains('group-sortable')) : [section]),
+        onStart: () => section.parentElement.classList.add('sorting-groups'),
+        onEnd: () => section.parentElement && section.parentElement.classList.remove('sorting-groups'),
+        onDrop: (ids) => guard(State.reorder('groups', ids)),
+      });
+    }
+    return section;
   }
 
   /** Eigener Bereich für Sparschweine, unabhängig von den Gruppen */
@@ -4524,6 +4706,8 @@ App.Router = (() => {
       return;
     }
     if (!State.s.snap) { UI.mount(root, Views.welcome()); return; }
+    /* Während des Ziehens nicht neu zeichnen, sonst verliert man das gezogene Element */
+    if (document.body.classList.contains('drag-active')) return;
     const route = current();
     const prev = root.dataset.route;
     UI.mount(root, Views.shell(route, ROUTES[route]()));
@@ -4557,6 +4741,7 @@ App.Bootstrap = (async () => {
   /* Sperren: Dialoge schliessen, entschlüsselte Daten aus dem Speicher werfen */
   Vault.onLock(() => {
     document.querySelectorAll('dialog[open]').forEach((d) => d.close());
+    document.body.classList.remove('drag-active');
     const toastEl = document.getElementById('toast');
     if (toastEl) { toastEl.textContent = ''; toastEl.className = ''; }
     Fun.reset();
